@@ -22,21 +22,24 @@ WORKDIR /app
 # See https://docs.docker.com/go/dockerfile-user-best-practices/
 ARG UID=10001
 RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    appuser
+	--disabled-password \
+	--gecos "" \
+	--home "/nonexistent" \
+	--shell "/sbin/nologin" \
+	--no-create-home \
+	--uid "${UID}" \
+	appuser
+
+# Install cron
+RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
 
 # Download dependencies as a separate step to take advantage of Docker's caching.
 # Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
 # Leverage a bind mount to requirements.txt to avoid having to copy them into
 # into this layer.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,source=requirements.txt,target=requirements.txt \
-    python -m pip install -r requirements.txt
+	--mount=type=bind,source=requirements.txt,target=requirements.txt \
+	python -m pip install -r requirements.txt
 
 # Switch to the non-privileged user to run the application.
 USER appuser
@@ -44,8 +47,17 @@ USER appuser
 # Copy the source code into the container.
 COPY . .
 
-# Expose the port that the application listens on.
+# Add a cron job
+RUN echo "0 0 * * * /usr/local/bin/python3 /app/bot.py >> /var/log/cron.log 2>&1" > /etc/cron.d/mycron
 
+# Give execution rights on the cron job
+RUN chmod 0644 /etc/cron.d/mycron
 
-# Run the application.
-CMD python3 bot.py
+# Apply cron job
+RUN crontab /etc/cron.d/mycron
+
+# Create the log file to be able to run tail
+RUN touch /var/log/cron.log
+
+# Start the cron service and the application
+CMD cron && tail -f /var/log/cron.log
